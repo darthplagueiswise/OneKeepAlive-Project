@@ -1,0 +1,56 @@
+name: build-onekeepalive
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-iphoneos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode/SDK versions
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Build OneKeepAlive.dylib (arm64 + arm64e with fallback)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build/iphoneos
+          if clang -isysroot "$SDK" -fobjc-arc -O2 \
+              -arch arm64 -arch arm64e \
+              -miphoneos-version-min=12.0 \
+              -framework Foundation -framework AVFoundation -framework UIKit \
+              -dynamiclib \
+              -install_name @rpath/OneKeepAlive.dylib \
+              -current_version 1.0 -compatibility_version 1.0 \
+              OneKeepAlive.m -o build/iphoneos/OneKeepAlive.dylib; then
+            echo "Built universal (arm64 + arm64e)"
+          else
+            echo "arm64e failed on this Xcode; building arm64 only"
+            clang -isysroot "$SDK" -fobjc-arc -O2 \
+              -arch arm64 \
+              -miphoneos-version-min=12.0 \
+              -framework Foundation -framework AVFoundation -framework UIKit \
+              -dynamiclib \
+              -install_name @rpath/OneKeepAlive.dylib \
+              -current_version 1.0 -compatibility_version 1.0 \
+              OneKeepAlive.m -o build/iphoneos/OneKeepAlive.dylib
+          fi
+          file build/iphoneos/OneKeepAlive.dylib || true
+          otool -L build/iphoneos/OneKeepAlive.dylib || true
+          shasum -a 256 build/iphoneos/OneKeepAlive.dylib > build/iphoneos/OneKeepAlive.dylib.sha256
+
+      - name: Package artifact
+        run: |
+          cd build/iphoneos
+          zip -r ../../OneKeepAlive-iphoneos.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OneKeepAlive-iphoneos
+          path: OneKeepAlive-iphoneos.zip
